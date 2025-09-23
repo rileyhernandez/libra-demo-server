@@ -15,6 +15,8 @@ from flask import Flask, jsonify, Response, request
 from flask_cors import CORS
 import logging
 
+from data import ClientData
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -198,7 +200,7 @@ class LibraLogServer:
             records = self.monitor.get_recent_records(1)
             if records:
                 return jsonify({
-                    'record': records[0],
+                    'record': ClientData.from_log(records[0]),
                     'timestamp': datetime.now().isoformat()
                 })
             else:
