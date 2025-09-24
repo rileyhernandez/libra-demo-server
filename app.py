@@ -164,12 +164,26 @@ class LibraLogMonitor:
 
                 latest_data = {}
                 for i, scale_num in enumerate(scales, start=1):
+                    # cursor.execute("""
+                    #                SELECT rowid, model, number, timestamp, action, amount, location, ingredient, synced
+                    #                FROM libra_logs
+                    #                WHERE number = ?
+                    #                ORDER BY rowid DESC
+                    #                    LIMIT 1
+                    #                """, (scale_num,))
+
                     cursor.execute("""
                                    SELECT rowid, model, number, timestamp, action, amount, location, ingredient, synced
                                    FROM libra_logs
                                    WHERE number = ?
-                                   ORDER BY rowid DESC
-                                       LIMIT 1
+                                   ORDER BY
+                                       CASE
+                                       WHEN action IN ('Served', 'Refilled') THEN 0
+                                       ELSE 1
+                                   END
+                                   ,
+                            rowid DESC
+                        LIMIT 1
                                    """, (scale_num,))
 
                     record = cursor.fetchone()
