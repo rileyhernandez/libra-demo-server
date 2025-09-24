@@ -759,12 +759,14 @@ class LibraLogServer:
     </div>
 
     <script>
-        const scaleUnits = {
-        "scale_1": {"name": "bags", "size": 50},  
-        "scale_2": {"name": "g", "size": 1},
-        "scale_3": {"name": "g", "size": 1},   
-        "scale_4": {"name": "ct", "size": 620}
-        }
+        // Full capacities for each scale (set manually)
+        const scaleCapacities = {
+            "scale_1": 5000,  // full capacity in grams
+            "scale_2": 2000,
+            "scale_3": 3000,
+            "scale_4": 6200
+        };
+
     
         let connectionStatus = 'disconnected';
 
@@ -789,13 +791,14 @@ class LibraLogServer:
         }
 
         function formatAmount(amount, scaleNum) {
-            if (!amount) return `0 ${scaleUnits["scale_" + scaleNum].name}`;
-            
-            const unitInfo = scaleUnits["scale_" + scaleNum];
-            const unitValue = amount / unitInfo.size;
-            
-            return Math.round(unitValue) + " " + unitInfo.name;
+            if (!amount) return "0%";
+        
+            const fullAmount = scaleCapacities["scale_" + scaleNum] || 1;
+            const percentage = (amount / fullAmount) * 100;
+        
+            return Math.round(percentage) + "%";
         }
+
 
 
         function getActionBadge(action) {
@@ -806,8 +809,8 @@ class LibraLogServer:
         function updateLatestReading(scaleNum, record) {
             const container = document.getElementById(`scale${scaleNum}Latest`);
         
-            if (!record) {
-                container.innerHTML = '<div class="no-data">No data available</div>';
+            if (!record || record.action !== "Heartbeat") {
+                container.innerHTML = '<div class="no-data">No heartbeat data</div>';
                 return;
             }
         
@@ -826,27 +829,29 @@ class LibraLogServer:
                 </div>
             `;
         
-            // Only flash if the data actually changed
             if (container.innerHTML !== newHTML) {
                 container.innerHTML = newHTML;
         
-                container.classList.remove("flash-update"); // reset animation
-                void container.offsetWidth; // force reflow to restart animation
+                container.classList.remove("flash-update");
+                void container.offsetWidth; // restart animation
                 container.classList.add("flash-update");
             }
         }
 
 
 
+
         function updateScaleLogs(scaleNum, records) {
             const tbody = document.getElementById(`scale${scaleNum}Logs`);
-
-            if (!records || records.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="4" class="loading">No recent activity</td></tr>';
+        
+            const heartbeatRecords = (records || []).filter(r => r.action === "Heartbeat");
+        
+            if (heartbeatRecords.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="loading">No heartbeat activity</td></tr>';
                 return;
             }
-
-            tbody.innerHTML = records.slice(0, 15).map(record => `
+        
+            tbody.innerHTML = heartbeatRecords.slice(0, 15).map(record => `
                 <tr>
                     <td class="timestamp">${formatTimestamp(record.timestamp)}</td>
                     <td class="ingredient-name">${record.ingredient}</td>
@@ -855,6 +860,7 @@ class LibraLogServer:
                 </tr>
             `).join('');
         }
+
 
         function loadScalesData() {
             // Load latest readings for each scale
