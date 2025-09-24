@@ -761,10 +761,10 @@ class LibraLogServer:
     <script>
         // Full capacities for each scale (set manually)
         const scaleCapacities = {
-            "scale_1": 5000,  // full capacity in grams
-            "scale_2": 2000,
+            "scale_1": 723.2,  // full capacity in grams
+            "scale_2": 500,
             "scale_3": 3000,
-            "scale_4": 6200
+            "scale_4": 4000
         };
 
     
