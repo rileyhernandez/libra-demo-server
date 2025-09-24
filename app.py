@@ -16,6 +16,12 @@ from flask_cors import CORS
 import logging
 
 scales = ['716710-0-0', '716710-1', '716710-2', '716710-3']
+scale_units = {
+    "scale_1": {"name": "bags", "size": 50},   # 1 bag = 50 g
+    "scale_2": {"name": "boxes", "size": 200}, # 1 box = 200 g
+    "scale_3": {"name": "g", "size": 1},       # plain grams
+    "scale_4": {"name": "kg", "size": 1000},   # 1 kg = 1000 g
+}
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -753,6 +759,13 @@ class LibraLogServer:
     </div>
 
     <script>
+        const scaleUnits = {
+        "scale_1": {"name": "bags", "size": 50},  
+        "scale_2": {"name": "g", "size": 1},
+        "scale_3": {"name": "g", "size": 1},   
+        "scale_4": {"name": "ct", "size": 620}
+        }
+    
         let connectionStatus = 'disconnected';
 
         function updateConnectionStatus(status) {
@@ -775,10 +788,15 @@ class LibraLogServer:
             return date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
         }
 
-        function formatAmount(amount) {
-            if (amount === 0) return '0g';
-            return parseFloat(amount).toLocaleString() + 'g';
+        function formatAmount(amount, scaleNum) {
+            if (!amount) return `0 ${scaleUnits["scale_" + scaleNum].name}`;
+            
+            const unitInfo = scaleUnits["scale_" + scaleNum];
+            const unitValue = amount / unitInfo.size;
+            
+            return Math.round(unitValue) + " " + unitInfo.name;
         }
+
 
         function getActionBadge(action) {
             const className = `action-${action.toLowerCase()}`;
@@ -795,7 +813,7 @@ class LibraLogServer:
         
             const newHTML = `
                 <div class="reading-ingredient">${record.ingredient}</div>
-                <div class="reading-amount">${formatAmount(record.amount)}</div>
+                <div class="reading-amount">${formatAmount(record.amount, scaleNum)}</div>
                 <div class="reading-details">
                     <div class="reading-detail">
                         <div class="label">Location</div>
@@ -832,7 +850,7 @@ class LibraLogServer:
                 <tr>
                     <td class="timestamp">${formatTimestamp(record.timestamp)}</td>
                     <td class="ingredient-name">${record.ingredient}</td>
-                    <td class="amount-value">${formatAmount(record.amount)}</td>
+                    <td class="amount-value">${formatAmount(record.amount, scaleNum)}</td>
                     <td>${getActionBadge(record.action)}</td>
                 </tr>
             `).join('');
@@ -871,8 +889,6 @@ class LibraLogServer:
                         updateScaleLogs(i, records);
                         totalRecords += records.length;
                     }
-
-                    document.getElementById('totalRecords').textContent = totalRecords;
                 })
                 .catch(error => {
                     console.error('Error loading scales data:', error);
