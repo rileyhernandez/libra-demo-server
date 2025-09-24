@@ -184,7 +184,7 @@ class LibraLogMonitor:
                                    WHERE number = ?
                                    ORDER BY
                                        CASE
-                                       WHEN action IN ('Served', 'Refilled') THEN 0
+                                       WHEN action IN ('Restarted', 'Heartbeat') THEN 0
                                        ELSE 1
                                    END
                                    ,
