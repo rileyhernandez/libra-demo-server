@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-SQLite Database Monitor Server
+SQLite Database Monitor Server - Multi-Scale iPad Version
 
 Monitors a SQLite database for new entries and serves them via HTTP endpoints.
-Supports real-time streaming of new data and querying historical data.
+Displays data from 4 different scales in separate columns optimized for iPad viewing.
 """
 
 import sqlite3
@@ -14,6 +14,8 @@ from datetime import datetime
 from flask import Flask, jsonify, Response, request, render_template_string
 from flask_cors import CORS
 import logging
+
+scales = ['716710-0-0', '716710-1', '716710-2', '716710-3']
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -83,7 +85,7 @@ class LibraLogMonitor:
         """Check for new records since last check"""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row  # Enable column access by name
+                conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
 
                 cursor.execute("""
@@ -96,10 +98,7 @@ class LibraLogMonitor:
                 records = cursor.fetchall()
 
                 if records:
-                    # Update last_rowid to the highest rowid we've seen
                     self.last_rowid = records[-1]['rowid']
-
-                    # Convert to list of dictionaries
                     return [dict(record) for record in records]
 
                 return []
@@ -129,23 +128,71 @@ class LibraLogMonitor:
             logger.error(f"Database error getting recent records: {e}")
             return []
 
+    def get_records_by_scale(self, limit=50):
+        """Get recent records grouped by scale number"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+
+                # Get recent records for each scale
+                scales_data = {}
+                for i, scale_num in enumerate(scales, start=1):
+                    cursor.execute("""
+                                   SELECT rowid, model, number, timestamp, action, amount, location, ingredient, synced
+                                   FROM libra_logs
+                                   WHERE number = ?
+                                   ORDER BY rowid DESC
+                                       LIMIT ?
+                                   """, (scale_num, limit))
+
+                    records = cursor.fetchall()
+                    scales_data[f"scale_{i}"] = [dict(record) for record in records]
+
+                return scales_data
+
+        except sqlite3.Error as e:
+            logger.error(f"Database error getting records by scale: {e}")
+            return {f'{scales[i]}': None for i in scales}
+
+    def get_latest_by_scale(self):
+        """Get the latest record for each scale"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+
+                latest_data = {}
+                for i, scale_num in enumerate(scales, start=1):
+                    cursor.execute("""
+                                   SELECT rowid, model, number, timestamp, action, amount, location, ingredient, synced
+                                   FROM libra_logs
+                                   WHERE number = ?
+                                   ORDER BY rowid DESC
+                                       LIMIT 1
+                                   """, (scale_num,))
+
+                    record = cursor.fetchone()
+                    latest_data[f"scale_{i}"] = dict(record) if record else None
+
+                return latest_data
+        except:
+            return {f'{scales[i]}': None for i in scales}
+
+
+
 
 class LibraLogServer:
     def __init__(self, db_path, port=5000, host='0.0.0.0'):
         self.app = Flask(__name__)
-        CORS(self.app)  # Enable CORS for web clients
+        CORS(self.app)
 
         self.monitor = LibraLogMonitor(db_path)
         self.port = port
         self.host = host
 
-        # Store for Server-Sent Events clients
         self.sse_clients = set()
-
-        # Set up routes
         self._setup_routes()
-
-        # Add callback for new data
         self.monitor.add_callback(self._on_new_data)
 
     def _setup_routes(self):
@@ -153,8 +200,8 @@ class LibraLogServer:
 
         @self.app.route('/')
         def dashboard():
-            """Main dashboard page"""
-            return render_template_string(self._get_dashboard_template())
+            """Main dashboard page optimized for iPad"""
+            return render_template_string(self._get_ipad_dashboard_template())
 
         @self.app.route('/health')
         def health_check():
@@ -169,7 +216,7 @@ class LibraLogServer:
         def get_recent():
             """Get recent records API"""
             limit = request.args.get('limit', 100, type=int)
-            limit = min(limit, 1000)  # Cap at 1000 records
+            limit = min(limit, 1000)
 
             records = self.monitor.get_recent_records(limit)
             return jsonify({
@@ -178,18 +225,36 @@ class LibraLogServer:
                 'timestamp': datetime.now().isoformat()
             })
 
+        @self.app.route('/api/scales')
+        def get_scales_data():
+            """Get data grouped by scale number"""
+            limit = request.args.get('limit', 20, type=int)
+            scales_data = self.monitor.get_records_by_scale(limit)
+
+            return jsonify({
+                'scales': scales_data,
+                'timestamp': datetime.now().isoformat()
+            })
+
+        @self.app.route('/api/latest_scales')
+        def get_latest_scales():
+            """Get latest record for each scale"""
+            latest_data = self.monitor.get_latest_by_scale()
+
+            return jsonify({
+                'latest': latest_data,
+                'timestamp': datetime.now().isoformat()
+            })
+
         @self.app.route('/api/stream')
         def stream_data():
             """Server-Sent Events endpoint for real-time data"""
 
             def event_stream():
-                # Send initial connection message
                 yield f"data: {json.dumps({'type': 'connected', 'timestamp': datetime.now().isoformat()})}\n\n"
-
-                # Keep connection alive
                 while True:
                     yield f"data: {json.dumps({'type': 'heartbeat', 'timestamp': datetime.now().isoformat()})}\n\n"
-                    time.sleep(30)  # Send heartbeat every 30 seconds
+                    time.sleep(30)
 
             response = Response(event_stream(), mimetype='text/event-stream')
             response.headers['Cache-Control'] = 'no-cache'
@@ -197,46 +262,21 @@ class LibraLogServer:
             response.headers['Access-Control-Allow-Origin'] = '*'
             return response
 
-        @self.app.route('/api/latest')
-        def get_latest():
-            """Get the single most recent record API"""
-            records = self.monitor.get_recent_records(1)
-            if records:
-                return jsonify({
-                    'record': records[0],
-                    'timestamp': datetime.now().isoformat()
-                })
-            else:
-                return jsonify({
-                    'record': None,
-                    'message': 'No records found',
-                    'timestamp': datetime.now().isoformat()
-                }), 404
-
     def _on_new_data(self, new_records):
         """Callback for when new data is detected"""
-        # Log new data
         for record in new_records:
-            logger.info(f"New record: {record['ingredient']} = {record['amount']} at {record['location']}")
+            logger.info(
+                f"Scale {record['number']}: {record['ingredient']} = {record['amount']}g at {record['location']}")
 
-        # Here you could add additional processing, such as:
-        # - Sending notifications
-        # - Triggering webhooks
-        # - Broadcasting via WebSocket
-        # - Storing in cache
-
-        # For now, we'll just broadcast via Server-Sent Events if you implement that
-        pass
-
-    def _get_dashboard_template(self):
-        """Return the HTML template for the dashboard"""
+    def _get_ipad_dashboard_template(self):
+        """Return the HTML template optimized for iPad landscape viewing"""
         return '''
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Libra Scale Monitor</title>
+    <title>Multi-Scale Monitor - iPad View</title>
     <style>
         * {
             margin: 0;
@@ -249,54 +289,64 @@ class LibraLogServer:
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             color: #333;
+            overflow-x: hidden;
         }
 
         .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
+            max-width: 100%;
+            margin: 0;
+            padding: 15px;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
 
         .header {
             text-align: center;
             color: white;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
+            flex-shrink: 0;
         }
 
         .header h1 {
-            font-size: 2.5rem;
+            font-size: 2rem;
             font-weight: 300;
-            margin-bottom: 10px;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            font-size: 1rem;
+            opacity: 0.9;
         }
 
         .status-bar {
             display: flex;
-            gap: 20px;
+            gap: 15px;
             justify-content: center;
-            margin-bottom: 30px;
-            flex-wrap: wrap;
+            margin-bottom: 20px;
+            flex-shrink: 0;
         }
 
         .status-item {
             background: rgba(255, 255, 255, 0.9);
-            padding: 15px 25px;
-            border-radius: 10px;
+            padding: 10px 20px;
+            border-radius: 8px;
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
             backdrop-filter: blur(10px);
             text-align: center;
-            min-width: 150px;
+            min-width: 120px;
         }
 
         .status-item h3 {
-            font-size: 0.9rem;
+            font-size: 0.75rem;
             color: #666;
-            margin-bottom: 5px;
+            margin-bottom: 3px;
             text-transform: uppercase;
             letter-spacing: 1px;
         }
 
         .status-item .value {
-            font-size: 1.8rem;
+            font-size: 1.2rem;
             font-weight: bold;
             color: #4f46e5;
         }
@@ -305,12 +355,12 @@ class LibraLogServer:
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 8px;
+            gap: 6px;
         }
 
         .connection-dot {
-            width: 12px;
-            height: 12px;
+            width: 10px;
+            height: 10px;
             border-radius: 50%;
             background: #ef4444;
             animation: pulse 2s infinite;
@@ -325,54 +375,73 @@ class LibraLogServer:
             50% { opacity: 0.5; }
         }
 
-        .data-section {
+        .scales-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            flex-grow: 1;
+            min-height: 0;
+        }
+
+        .scale-column {
             background: rgba(255, 255, 255, 0.95);
-            border-radius: 15px;
+            border-radius: 12px;
             box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
             backdrop-filter: blur(10px);
             overflow: hidden;
-            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
         }
 
-        .section-header {
+        .scale-header {
             background: linear-gradient(90deg, #4f46e5, #7c3aed);
             color: white;
-            padding: 20px 25px;
-            font-size: 1.2rem;
+            padding: 12px 15px;
+            font-size: 1rem;
             font-weight: 600;
+            text-align: center;
+            flex-shrink: 0;
         }
 
+        .scale-header.scale-1 { background: linear-gradient(90deg, #ef4444, #dc2626); }
+        .scale-header.scale-2 { background: linear-gradient(90deg, #10b981, #059669); }
+        .scale-header.scale-3 { background: linear-gradient(90deg, #f59e0b, #d97706); }
+        .scale-header.scale-4 { background: linear-gradient(90deg, #8b5cf6, #7c3aed); }
+
         .latest-reading {
-            padding: 30px;
+            padding: 15px;
             text-align: center;
             border-bottom: 1px solid #e5e7eb;
+            flex-shrink: 0;
         }
 
         .latest-reading.no-data {
             color: #6b7280;
             font-style: italic;
+            font-size: 0.9rem;
         }
 
         .reading-ingredient {
-            font-size: 2rem;
+            font-size: 1.2rem;
             font-weight: bold;
             color: #1f2937;
-            margin-bottom: 10px;
+            margin-bottom: 5px;
+            line-height: 1.2;
         }
 
         .reading-amount {
-            font-size: 3rem;
+            font-size: 1.8rem;
             font-weight: 300;
             color: #4f46e5;
-            margin-bottom: 15px;
+            margin-bottom: 8px;
         }
 
         .reading-details {
             display: flex;
-            justify-content: center;
-            gap: 30px;
+            justify-content: space-around;
             flex-wrap: wrap;
-            margin-top: 20px;
+            gap: 8px;
+            margin-top: 8px;
         }
 
         .reading-detail {
@@ -380,67 +449,71 @@ class LibraLogServer:
         }
 
         .reading-detail .label {
-            font-size: 0.8rem;
+            font-size: 0.65rem;
             color: #6b7280;
             text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 5px;
+            letter-spacing: 0.5px;
+            margin-bottom: 2px;
         }
 
         .reading-detail .value {
-            font-size: 1rem;
+            font-size: 0.8rem;
             color: #374151;
             font-weight: 500;
         }
 
         .action-badge {
             display: inline-block;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.65rem;
             font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.3px;
         }
 
         .action-starting { background: #dbeafe; color: #1e40af; }
         .action-heartbeat { background: #dcfce7; color: #166534; }
         .action-offline { background: #fee2e2; color: #dc2626; }
 
+        .logs-container {
+            flex-grow: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+
         .logs-table {
             width: 100%;
             border-collapse: collapse;
+            font-size: 0.75rem;
         }
 
         .logs-table th {
             background: #f8fafc;
-            padding: 15px 20px;
+            padding: 8px 10px;
             text-align: left;
             font-weight: 600;
             color: #374151;
-            border-bottom: 2px solid #e5e7eb;
-            font-size: 0.9rem;
+            border-bottom: 1px solid #e5e7eb;
+            font-size: 0.65rem;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.3px;
+            position: sticky;
+            top: 0;
         }
 
         .logs-table td {
-            padding: 15px 20px;
+            padding: 8px 10px;
             border-bottom: 1px solid #f3f4f6;
-            font-size: 0.9rem;
+            vertical-align: top;
         }
 
         .logs-table tr:hover {
             background: #f9fafb;
         }
 
-        .logs-container {
-            max-height: 600px;
-            overflow-y: auto;
-        }
-
         .logs-container::-webkit-scrollbar {
-            width: 8px;
+            width: 6px;
         }
 
         .logs-container::-webkit-scrollbar-track {
@@ -449,61 +522,81 @@ class LibraLogServer:
 
         .logs-container::-webkit-scrollbar-thumb {
             background: #cbd5e1;
-            border-radius: 4px;
+            border-radius: 3px;
         }
 
         .timestamp {
             font-family: 'Courier New', monospace;
             color: #6b7280;
+            font-size: 0.7rem;
+        }
+
+        .ingredient-name {
+            font-weight: 600;
+            color: #1f2937;
+            font-size: 0.75rem;
+        }
+
+        .amount-value {
+            font-weight: 500;
+            color: #4f46e5;
         }
 
         .loading {
             text-align: center;
-            padding: 40px;
+            padding: 20px;
             color: #6b7280;
+            font-size: 0.8rem;
         }
 
         .spinner {
             display: inline-block;
-            width: 20px;
-            height: 20px;
+            width: 16px;
+            height: 16px;
             border: 2px solid #f3f4f6;
             border-radius: 50%;
             border-top-color: #4f46e5;
             animation: spin 1s ease-in-out infinite;
-            margin-right: 10px;
+            margin-right: 8px;
         }
 
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
 
-        @media (max-width: 768px) {
+        /* iPad specific optimizations */
+        @media (max-width: 1024px) and (orientation: landscape) {
             .container {
                 padding: 10px;
             }
 
             .header h1 {
-                font-size: 2rem;
+                font-size: 1.8rem;
+            }
+
+            .scales-grid {
+                gap: 10px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .scales-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
+            }
+
+            .header h1 {
+                font-size: 1.5rem;
             }
 
             .status-bar {
-                flex-direction: column;
-                align-items: center;
+                flex-wrap: wrap;
             }
+        }
 
-            .reading-details {
-                flex-direction: column;
-                gap: 15px;
-            }
-
-            .logs-table {
-                font-size: 0.8rem;
-            }
-
-            .logs-table th,
-            .logs-table td {
-                padding: 10px 15px;
+        @media (max-width: 480px) {
+            .scales-grid {
+                grid-template-columns: 1fr;
             }
         }
     </style>
@@ -511,8 +604,8 @@ class LibraLogServer:
 <body>
     <div class="container">
         <div class="header">
-            <h1>Scale Monitor</h1>
-            <p>Real-time inventory monitoring dashboard</p>
+            <h1>Multi-Scale Monitor</h1>
+            <p>Real-time inventory monitoring across 4 scales</p>
         </div>
 
         <div class="status-bar">
@@ -524,6 +617,10 @@ class LibraLogServer:
                 </div>
             </div>
             <div class="status-item">
+                <h3>Active Scales</h3>
+                <div class="value" id="activeScales">-</div>
+            </div>
+            <div class="status-item">
                 <h3>Total Records</h3>
                 <div class="value" id="totalRecords">-</div>
             </div>
@@ -533,43 +630,105 @@ class LibraLogServer:
             </div>
         </div>
 
-        <div class="data-section">
-            <div class="section-header">
-                📊 Latest Reading
-            </div>
-            <div class="latest-reading" id="latestReading">
-                <div class="loading">
-                    <div class="spinner"></div>
-                    Loading latest reading...
+        <div class="scales-grid">
+            <div class="scale-column">
+                <div class="scale-header scale-1">🍎 Scale 1</div>
+                <div class="latest-reading" id="scale1Latest">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Loading...
+                    </div>
+                </div>
+                <div class="logs-container">
+                    <table class="logs-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Item</th>
+                                <th>Amount</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="scale1Logs">
+                            <tr><td colspan="4" class="loading">Loading...</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
-        </div>
 
-        <div class="data-section">
-            <div class="section-header">
-                📋 Recent Activity
+            <div class="scale-column">
+                <div class="scale-header scale-2">🥕 Scale 2</div>
+                <div class="latest-reading" id="scale2Latest">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Loading...
+                    </div>
+                </div>
+                <div class="logs-container">
+                    <table class="logs-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Item</th>
+                                <th>Amount</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="scale2Logs">
+                            <tr><td colspan="4" class="loading">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
-            <div class="logs-container">
-                <table class="logs-table">
-                    <thead>
-                        <tr>
-                            <th>Time</th>
-                            <th>Ingredient</th>
-                            <th>Amount</th>
-                            <th>Location</th>
-                            <th>Action</th>
-                            <th>Scale</th>
-                        </tr>
-                    </thead>
-                    <tbody id="logsTableBody">
-                        <tr>
-                            <td colspan="6" class="loading">
-                                <div class="spinner"></div>
-                                Loading recent activity...
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+
+            <div class="scale-column">
+                <div class="scale-header scale-3">🧄 Scale 3</div>
+                <div class="latest-reading" id="scale3Latest">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Loading...
+                    </div>
+                </div>
+                <div class="logs-container">
+                    <table class="logs-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Item</th>
+                                <th>Amount</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="scale3Logs">
+                            <tr><td colspan="4" class="loading">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="scale-column">
+                <div class="scale-header scale-4">🥒 Scale 4</div>
+                <div class="latest-reading" id="scale4Latest">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Loading...
+                    </div>
+                </div>
+                <div class="logs-container">
+                    <table class="logs-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Item</th>
+                                <th>Amount</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="scale4Logs">
+                            <tr><td colspan="4" class="loading">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -594,12 +753,7 @@ class LibraLogServer:
 
         function formatTimestamp(timestamp) {
             const date = new Date(timestamp);
-            return date.toLocaleTimeString();
-        }
-
-        function formatDate(timestamp) {
-            const date = new Date(timestamp);
-            return date.toLocaleDateString();
+            return date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
         }
 
         function formatAmount(amount) {
@@ -612,8 +766,8 @@ class LibraLogServer:
             return `<span class="action-badge ${className}">${action}</span>`;
         }
 
-        function updateLatestReading(record) {
-            const container = document.getElementById('latestReading');
+        function updateLatestReading(scaleNum, record) {
+            const container = document.getElementById(`scale${scaleNum}Latest`);
 
             if (!record) {
                 container.innerHTML = '<div class="no-data">No data available</div>';
@@ -629,67 +783,79 @@ class LibraLogServer:
                         <div class="value">${record.location}</div>
                     </div>
                     <div class="reading-detail">
-                        <div class="label">Scale</div>
-                        <div class="value">${record.number}</div>
-                    </div>
-                    <div class="reading-detail">
                         <div class="label">Action</div>
                         <div class="value">${getActionBadge(record.action)}</div>
-                    </div>
-                    <div class="reading-detail">
-                        <div class="label">Model</div>
-                        <div class="value">${record.model}</div>
                     </div>
                 </div>
             `;
         }
 
-        function updateLogsTable(records) {
-            const tbody = document.getElementById('logsTableBody');
+        function updateScaleLogs(scaleNum, records) {
+            const tbody = document.getElementById(`scale${scaleNum}Logs`);
 
             if (!records || records.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" class="loading">No recent activity</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="4" class="loading">No recent activity</td></tr>';
                 return;
             }
 
-            tbody.innerHTML = records.map(record => `
+            tbody.innerHTML = records.slice(0, 15).map(record => `
                 <tr>
                     <td class="timestamp">${formatTimestamp(record.timestamp)}</td>
-                    <td><strong>${record.ingredient}</strong></td>
-                    <td>${formatAmount(record.amount)}</td>
-                    <td>${record.location}</td>
+                    <td class="ingredient-name">${record.ingredient}</td>
+                    <td class="amount-value">${formatAmount(record.amount)}</td>
                     <td>${getActionBadge(record.action)}</td>
-                    <td>${record.number}</td>
                 </tr>
             `).join('');
         }
 
-        function loadRecentData() {
-            fetch('/api/recent?limit=50')
+        function loadScalesData() {
+            // Load latest readings for each scale
+            fetch('/api/latest_scales')
                 .then(response => response.json())
                 .then(data => {
                     updateConnectionStatus('connected');
-                    document.getElementById('totalRecords').textContent = data.count;
-                    document.getElementById('lastUpdated').textContent = formatTimestamp(data.timestamp);
 
-                    if (data.records && data.records.length > 0) {
-                        updateLatestReading(data.records[0]);
-                        updateLogsTable(data.records);
+                    let activeScales = 0;
+                    for (let i = 1; i <= 4; i++) {
+                        const scaleData = data.latest[`scale_${i}`];
+                        updateLatestReading(i, scaleData);
+                        if (scaleData) activeScales++;
                     }
+
+                    document.getElementById('activeScales').textContent = activeScales;
+                    document.getElementById('lastUpdated').textContent = formatTimestamp(data.timestamp);
                 })
                 .catch(error => {
-                    console.error('Error loading data:', error);
+                    console.error('Error loading latest data:', error);
                     updateConnectionStatus('disconnected');
+                });
+
+            // Load recent logs for each scale
+            fetch('/api/scales?limit=20')
+                .then(response => response.json())
+                .then(data => {
+                    let totalRecords = 0;
+
+                    for (let i = 1; i <= 4; i++) {
+                        const records = data.scales[`scale_${i}`] || [];
+                        updateScaleLogs(i, records);
+                        totalRecords += records.length;
+                    }
+
+                    document.getElementById('totalRecords').textContent = totalRecords;
+                })
+                .catch(error => {
+                    console.error('Error loading scales data:', error);
                 });
         }
 
         // Load initial data
-        loadRecentData();
+        loadScalesData();
 
         // Refresh data every 2 seconds
-        setInterval(loadRecentData, 2000);
+        setInterval(loadScalesData, 2000);
 
-        // Update last updated time every second
+        // Update timestamp every second for connected status
         setInterval(() => {
             if (connectionStatus === 'connected') {
                 const now = new Date();
@@ -703,12 +869,9 @@ class LibraLogServer:
 
     def start(self):
         """Start the monitoring and web server"""
-        logger.info(f"Starting Libra Log Server on {self.host}:{self.port}")
-
-        # Start database monitoring
+        logger.info(f"Starting Multi-Scale Libra Log Server on {self.host}:{self.port}")
         self.monitor.start_monitoring()
 
-        # Start Flask server
         try:
             self.app.run(host=self.host, port=self.port, debug=False, threaded=True)
         except KeyboardInterrupt:
@@ -721,7 +884,7 @@ def main():
     """Main entry point"""
     import argparse
 
-    parser = argparse.ArgumentParser(description='Libra Log Database Monitor Server')
+    parser = argparse.ArgumentParser(description='Multi-Scale Libra Log Database Monitor Server')
     parser.add_argument('--db', default='libra_logs.db', help='Path to SQLite database file')
     parser.add_argument('--port', type=int, default=5000, help='Port to serve on')
     parser.add_argument('--host', default='0.0.0.0', help='Host to bind to')
@@ -729,19 +892,19 @@ def main():
 
     args = parser.parse_args()
 
-    # Create and start server
     server = LibraLogServer(args.db, args.port, args.host)
     server.monitor.poll_interval = args.poll_interval
 
-    logger.info("=== Libra Log Monitor Server ===")
+    logger.info("=== Multi-Scale Libra Log Monitor Server ===")
     logger.info(f"Database: {args.db}")
     logger.info(f"Server: http://{args.host}:{args.port}")
     logger.info(f"Poll interval: {args.poll_interval}s")
     logger.info("Available endpoints:")
-    logger.info(f"  GET / - Web dashboard")
+    logger.info(f"  GET / - Multi-scale web dashboard (iPad optimized)")
     logger.info(f"  GET /health - Server health check")
     logger.info(f"  GET /api/recent?limit=N - Get recent records (default: 100)")
-    logger.info(f"  GET /api/latest - Get most recent record")
+    logger.info(f"  GET /api/scales?limit=N - Get records grouped by scale (default: 20)")
+    logger.info(f"  GET /api/latest_scales - Get latest record for each scale")
     logger.info(f"  GET /api/stream - Server-sent events stream (real-time)")
 
     try:

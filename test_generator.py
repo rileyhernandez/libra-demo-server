@@ -26,7 +26,7 @@ class LibraTestDataGenerator:
 
         # Sample data for realistic test entries
         self.models = ["LibraV0", "LibraV1", "LibraV2"]
-        self.scale_numbers = ["SCALE001", "SCALE002", "SCALE003", "SCALE004"]
+        self.scale_numbers = ['716710-0-0', '716710-1', '716710-2', '716710-3']
         self.actions = ["Starting", "Heartbeat", "Offline"]
         self.locations = [
             "Kitchen Counter", "Prep Station A", "Prep Station B",
