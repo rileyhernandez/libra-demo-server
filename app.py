@@ -290,7 +290,7 @@ class LibraLogServer:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multi-Scale Monitor - iPad View</title>
+    <title>Libra Kitchen Monitor - iPad View</title>
     <style>
         * {
             margin: 0;
@@ -627,7 +627,7 @@ class LibraLogServer:
 <body>
     <div class="container">
         <div class="header">
-            <h1>Multi-Scale Monitor</h1>
+            <h1>Libra Kitchen Monitor</h1>
             <p>Real-time inventory monitoring across 4 scales</p>
         </div>
 
@@ -642,10 +642,6 @@ class LibraLogServer:
             <div class="status-item">
                 <h3>Active Scales</h3>
                 <div class="value" id="activeScales">-</div>
-            </div>
-            <div class="status-item">
-                <h3>Total Records</h3>
-                <div class="value" id="totalRecords">-</div>
             </div>
             <div class="status-item">
                 <h3>Last Updated</h3>
