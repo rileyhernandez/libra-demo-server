@@ -511,8 +511,8 @@ class LibraLogServer:
 <body>
     <div class="container">
         <div class="header">
-            <h1>⚖️ Libra Scale Monitor</h1>
-            <p>Real-time ingredient monitoring dashboard</p>
+            <h1>Scale Monitor</h1>
+            <p>Real-time inventory monitoring dashboard</p>
         </div>
 
         <div class="status-bar">
