@@ -486,9 +486,9 @@ class LibraLogServer:
             letter-spacing: 0.3px;
         }
 
-        .action-starting { background: #dbeafe; color: #1e40af; }
-        .action-heartbeat { background: #dcfce7; color: #166534; }
-        .action-offline { background: #fee2e2; color: #dc2626; }
+        .action-heartbeat { background: #dbeafe; color: #1e40af; }
+        .action-served { background: #dcfce7; color: #166534; }
+        .action-refilled { background: #fee2e2; color: #dc2626; }
 
         .logs-container {
             flex-grow: 1;
@@ -613,6 +613,15 @@ class LibraLogServer:
                 grid-template-columns: 1fr;
             }
         }
+        .flash-update {
+            animation: flash-bg 1s ease;
+        }
+        
+        @keyframes flash-bg {
+            0%   { background-color: #fef9c3; } /* light yellow */
+            100% { background-color: transparent; }
+        }
+
     </style>
 </head>
 <body>
@@ -782,13 +791,13 @@ class LibraLogServer:
 
         function updateLatestReading(scaleNum, record) {
             const container = document.getElementById(`scale${scaleNum}Latest`);
-
+        
             if (!record) {
                 container.innerHTML = '<div class="no-data">No data available</div>';
                 return;
             }
-
-            container.innerHTML = `
+        
+            const newHTML = `
                 <div class="reading-ingredient">${record.ingredient}</div>
                 <div class="reading-amount">${formatAmount(record.amount)}</div>
                 <div class="reading-details">
@@ -802,7 +811,18 @@ class LibraLogServer:
                     </div>
                 </div>
             `;
+        
+            // Only flash if the data actually changed
+            if (container.innerHTML !== newHTML) {
+                container.innerHTML = newHTML;
+        
+                container.classList.remove("flash-update"); // reset animation
+                void container.offsetWidth; // force reflow to restart animation
+                container.classList.add("flash-update");
+            }
         }
+
+
 
         function updateScaleLogs(scaleNum, records) {
             const tbody = document.getElementById(`scale${scaleNum}Logs`);
